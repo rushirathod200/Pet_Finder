@@ -5,7 +5,6 @@ services:
     plan: free
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    dockerCommand: sh /var/www/html/scripts/start-web.sh
     healthCheckPath: /up
     envVars:
       - key: APP_ENV
