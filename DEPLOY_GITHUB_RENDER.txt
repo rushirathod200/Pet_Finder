@@ -36,6 +36,7 @@ C) Deploy on Render (Recommended via Blueprint)
 -----------------------------------------------
 This repo includes:
 - render.yaml
+- Dockerfile
 
 Render steps:
 1. Go to Render Dashboard -> New -> Blueprint.
@@ -43,6 +44,15 @@ Render steps:
 3. Render will detect `render.yaml` and create:
    - `pet-finder-web` (Laravel app)
    - `pet-finder-socket` (WebSocket relay)
+
+If you create services manually (New -> Web Service):
+- Language/Runtime: Docker
+- Dockerfile Path: `./Dockerfile`
+- Root Directory: leave empty
+- Build Command: leave empty
+- Start Command:
+  - web: leave empty (uses Dockerfile CMD)
+  - socket: `php artisan chat:socket 0.0.0.0 $PORT`
 
 
 D) Required Env Values in Render
@@ -75,13 +85,12 @@ E) One-time Production Commands (after first deploy)
 ----------------------------------------------------
 In Render Shell for `pet-finder-web`:
 
-php artisan key:generate --force
 php artisan migrate --force
 php artisan storage:link
 php artisan db:seed --force
 php artisan optimize:clear
 
-If APP_KEY was generated automatically by Render, copy that same APP_KEY to `pet-finder-socket`.
+Use the same APP_KEY value in both services.
 
 
 F) Verify Deployment
@@ -115,4 +124,3 @@ H) If You Already Pushed .env Accidentally
 2. Remove secrets from history (BFG or git filter-repo).
 3. Force push cleaned history.
 4. Revoke old credentials.
-

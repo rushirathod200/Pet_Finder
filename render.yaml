@@ -1,10 +1,11 @@
 services:
   - type: web
     name: pet-finder-web
-    env: php
+    runtime: docker
     plan: free
-    buildCommand: composer install --no-dev --optimize-autoloader
-    startCommand: php artisan serve --host 0.0.0.0 --port $PORT
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: sh -lc "php artisan serve --host 0.0.0.0 --port ${PORT:-10000}"
     healthCheckPath: /up
     envVars:
       - key: APP_ENV
@@ -52,10 +53,11 @@ services:
 
   - type: web
     name: pet-finder-socket
-    env: php
+    runtime: docker
     plan: free
-    buildCommand: composer install --no-dev --optimize-autoloader
-    startCommand: php artisan chat:socket 0.0.0.0 $PORT
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: sh -lc "php artisan chat:socket 0.0.0.0 ${PORT:-10000}"
     envVars:
       - key: APP_ENV
         value: production
