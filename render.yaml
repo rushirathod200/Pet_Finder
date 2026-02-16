@@ -5,7 +5,7 @@ services:
     plan: free
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    dockerCommand: ./scripts/start-web.sh
+    dockerCommand: sh /var/www/html/scripts/start-web.sh
     healthCheckPath: /up
     envVars:
       - key: APP_ENV
@@ -57,7 +57,7 @@ services:
     plan: free
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    dockerCommand: ./scripts/start-socket.sh
+    dockerCommand: sh /var/www/html/scripts/start-socket.sh
     envVars:
       - key: APP_ENV
         value: production
