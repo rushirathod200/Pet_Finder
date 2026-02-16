@@ -43,6 +43,7 @@ RUN rm -f public/hot \
     && rm -rf public/storage \
     && mkdir -p storage/logs storage/framework/cache storage/framework/sessions storage/framework/views bootstrap/cache \
     && ln -s /var/www/html/storage/app/public public/storage \
+    && chmod +x scripts/start-web.sh scripts/start-socket.sh \
     && chmod -R 775 storage bootstrap/cache
 
 EXPOSE 10000
