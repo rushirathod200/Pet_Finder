@@ -1,0 +1,118 @@
+Pet Finder Deployment (GitHub -> Render) with Secret Safety
+============================================================
+
+A) Secret Safety Checklist (Must do first)
+------------------------------------------
+1. Never upload `.env` to GitHub.
+2. Use `.env.example` only (safe template).
+3. Put all real credentials in Render Environment Variables.
+4. If `.env` was ever committed in any repo history, rotate all secrets.
+
+This project is already configured to ignore:
+- .env
+- .env.*
+- key/cert files
+
+
+B) Prepare Git Repo Locally
+---------------------------
+Run these commands in project root:
+
+1) Initialize git (if not already):
+git init -b main
+
+2) Add files:
+git add .
+
+3) Commit:
+git commit -m "Initial Pet Finder app setup for Render deployment"
+
+4) Create empty GitHub repo (in browser), then connect and push:
+git remote add origin https://github.com/<YOUR_USERNAME>/<YOUR_REPO>.git
+git push -u origin main
+
+
+C) Deploy on Render (Recommended via Blueprint)
+-----------------------------------------------
+This repo includes:
+- render.yaml
+
+Render steps:
+1. Go to Render Dashboard -> New -> Blueprint.
+2. Select your GitHub repo.
+3. Render will detect `render.yaml` and create:
+   - `pet-finder-web` (Laravel app)
+   - `pet-finder-socket` (WebSocket relay)
+
+
+D) Required Env Values in Render
+--------------------------------
+Set these in `pet-finder-web` service:
+- APP_URL = https://<your-web-service>.onrender.com
+- DB_HOST
+- DB_PORT
+- DB_DATABASE
+- DB_USERNAME
+- DB_PASSWORD
+- CHAT_SOCKET_URL = wss://<your-socket-service>.onrender.com
+- CHAT_SOCKET_SERVER_URL = wss://<your-socket-service>.onrender.com
+- GOOGLE_CLIENT_ID (if Google auth used)
+- MAIL_HOST
+- MAIL_PORT
+- MAIL_USERNAME
+- MAIL_PASSWORD
+- MAIL_FROM_ADDRESS
+
+Set this in `pet-finder-socket` service:
+- APP_URL = https://<your-web-service>.onrender.com
+- APP_KEY = same APP_KEY as `pet-finder-web`
+
+Important:
+- Render does not provide built-in MySQL. Use external MySQL provider and set DB_*.
+
+
+E) One-time Production Commands (after first deploy)
+----------------------------------------------------
+In Render Shell for `pet-finder-web`:
+
+php artisan key:generate --force
+php artisan migrate --force
+php artisan storage:link
+php artisan db:seed --force
+php artisan optimize:clear
+
+If APP_KEY was generated automatically by Render, copy that same APP_KEY to `pet-finder-socket`.
+
+
+F) Verify Deployment
+--------------------
+1. Open:
+   - https://<your-web-service>.onrender.com
+2. Check login/signup.
+3. Check listing + image upload.
+4. Check chat realtime:
+   - keep socket service running
+   - send message from two users and verify no refresh needed
+5. Check lost pet email notifications.
+
+
+G) If Realtime Chat Does Not Work
+---------------------------------
+1. Confirm `pet-finder-socket` service is live.
+2. Confirm in web env:
+   - CHAT_SOCKET_URL uses `wss://...`
+   - CHAT_SOCKET_SERVER_URL uses same socket URL
+3. Check browser console for WebSocket connection errors.
+4. Check socket service logs in Render.
+
+
+H) If You Already Pushed .env Accidentally
+------------------------------------------
+1. Immediately rotate all leaked credentials:
+   - DB password
+   - Mail password
+   - API keys
+2. Remove secrets from history (BFG or git filter-repo).
+3. Force push cleaned history.
+4. Revoke old credentials.
+
