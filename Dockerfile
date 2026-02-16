@@ -39,9 +39,10 @@ COPY . .
 COPY --from=vendor /app/vendor ./vendor
 COPY --from=frontend /app/public/build ./public/build
 
-RUN rm -f public/hot public/storage \
+RUN rm -f public/hot \
+    && rm -rf public/storage \
     && mkdir -p storage/logs storage/framework/cache storage/framework/sessions storage/framework/views bootstrap/cache \
-    && php artisan storage:link \
+    && ln -s /var/www/html/storage/app/public public/storage \
     && chmod -R 775 storage bootstrap/cache
 
 EXPOSE 10000
