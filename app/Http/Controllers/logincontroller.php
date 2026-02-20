@@ -21,102 +21,114 @@ class logincontroller extends Controller
 
     function loginuser(Request $request)
     {
-        if ($request->filled('fullname')) {
-            $signupEmail = trim((string) ($request->input('email') ?? $request->input('identifier') ?? ''));
-            if ($signupEmail !== '') {
-                $request->merge(['email' => $signupEmail]);
+        try {
+            if ($request->filled('fullname')) {
+                $signupEmail = trim((string) ($request->input('email') ?? $request->input('identifier') ?? ''));
+                if ($signupEmail !== '') {
+                    $request->merge(['email' => $signupEmail]);
+                }
+
+                $data = $request->validate([
+                    'fullname' => ['required', 'string', 'max:255'],
+                    'email' => ['required', 'email', 'max:255', 'unique:usersdatas,email'],
+                    'phone_country' => ['required', 'in:IN,US,AU,DE'],
+                    'phone' => ['required', 'string'],
+                    'signup_password' => ['required', 'string', 'min:6', 'confirmed'],
+                ]);
+
+                $normalizedPhone = $this->normalizePhone($data['phone']);
+                if (!preg_match('/^\d{6,15}$/', $normalizedPhone)) {
+                    throw ValidationException::withMessages([
+                        'phone' => 'Enter a valid phone number.',
+                    ]);
+                }
+
+                $storedPhone = $this->formatPhoneWithCountryCode($data['phone_country'], $normalizedPhone);
+
+                if (usersdata::where('phone', $storedPhone)->exists()) {
+                    throw ValidationException::withMessages([
+                        'phone' => 'Phone number is already registered.',
+                    ]);
+                }
+
+                $user = usersdata::create([
+                    'fullname' => $data['fullname'],
+                    'email' => $data['email'],
+                    'phone' => $storedPhone,
+                    'location' => null,
+                    'password' => Hash::make($data['signup_password']),
+                ]);
+
+                $request->session()->put('useremail', $user->email);
+                $request->session()->regenerate();
+                $this->deferUserCityLookup($request, (int) $user->id);
+
+                return redirect('/profile');
             }
 
+            $identifier = trim((string) ($request->input('identifier') ?? $request->input('email') ?? ''));
             $data = $request->validate([
-                'fullname' => ['required', 'string', 'max:255'],
-                'email' => ['required', 'email', 'max:255', 'unique:usersdatas,email'],
-                'phone_country' => ['required', 'in:IN,US,AU,DE'],
-                'phone' => ['required', 'string'],
-                'signup_password' => ['required', 'string', 'min:6', 'confirmed'],
+                'identifier' => ['nullable', 'string', 'max:255'],
+                'email' => ['nullable', 'string', 'max:255'],
+                'login_password' => ['required', 'string'],
             ]);
 
-            $normalizedPhone = $this->normalizePhone($data['phone']);
-            if (!preg_match('/^\d{6,15}$/', $normalizedPhone)) {
+            if ($identifier === '') {
                 throw ValidationException::withMessages([
-                    'phone' => 'Enter a valid phone number.',
+                    'identifier' => 'Email or phone number is required.',
                 ]);
             }
 
-            $storedPhone = $this->formatPhoneWithCountryCode($data['phone_country'], $normalizedPhone);
+            $user = null;
+            if (filter_var($identifier, FILTER_VALIDATE_EMAIL)) {
+                $user = usersdata::where('email', $identifier)->first();
+            } else {
+                $normalizedPhone = $this->normalizePhone($identifier);
+                if (!preg_match('/^\d{6,15}$/', $normalizedPhone)) {
+                    throw ValidationException::withMessages([
+                        'identifier' => 'Enter a valid email or phone number.',
+                    ]);
+                }
 
-            if (usersdata::where('phone', $storedPhone)->exists()) {
-                throw ValidationException::withMessages([
-                    'phone' => 'Phone number is already registered.',
-                ]);
+                $trimmedIdentifier = trim($identifier);
+                $phoneCandidates = [
+                    $trimmedIdentifier,
+                    $normalizedPhone,
+                    '+'.$normalizedPhone,
+                ];
+
+                if (strlen($normalizedPhone) <= 12) {
+                    foreach ($this->countryDialCodeMap() as $dialCode) {
+                        $phoneCandidates[] = $dialCode.$normalizedPhone;
+                    }
+                }
+
+                $phoneCandidates = array_values(array_unique(array_filter($phoneCandidates, fn ($value) => $value !== '')));
+                $user = usersdata::whereIn('phone', $phoneCandidates)->first();
             }
 
-            $user = usersdata::create([
-                'fullname' => $data['fullname'],
-                'email' => $data['email'],
-                'phone' => $storedPhone,
-                'location' => null,
-                'password' => Hash::make($data['signup_password']),
-            ]);
+            if (!$user || !Hash::check($data['login_password'], $user->password)) {
+                throw ValidationException::withMessages([
+                    'identifier' => 'Invalid credentials.',
+                ]);
+            }
 
             $request->session()->put('useremail', $user->email);
             $request->session()->regenerate();
             $this->deferUserCityLookup($request, (int) $user->id);
 
             return redirect('/profile');
-        }
-
-        $identifier = trim((string) ($request->input('identifier') ?? $request->input('email') ?? ''));
-        $data = $request->validate([
-            'identifier' => ['nullable', 'string', 'max:255'],
-            'email' => ['nullable', 'string', 'max:255'],
-            'login_password' => ['required', 'string'],
-        ]);
-
-        if ($identifier === '') {
-            throw ValidationException::withMessages([
-                'identifier' => 'Email or phone number is required.',
-            ]);
-        }
-
-        $user = null;
-        if (filter_var($identifier, FILTER_VALIDATE_EMAIL)) {
-            $user = usersdata::where('email', $identifier)->first();
-        } else {
-            $normalizedPhone = $this->normalizePhone($identifier);
-            if (!preg_match('/^\d{6,15}$/', $normalizedPhone)) {
+        } catch (ValidationException $validationException) {
+            throw $validationException;
+        } catch (\Throwable $th) {
+            if ($this->isDatabaseConnectionIssue($th)) {
                 throw ValidationException::withMessages([
-                    'identifier' => 'Enter a valid email or phone number.',
+                    'identifier' => 'Service temporarily unavailable. Please try again in a few minutes.',
                 ]);
             }
 
-            $trimmedIdentifier = trim($identifier);
-            $phoneCandidates = [
-                $trimmedIdentifier,
-                $normalizedPhone,
-                '+'.$normalizedPhone,
-            ];
-
-            if (strlen($normalizedPhone) <= 12) {
-                foreach ($this->countryDialCodeMap() as $dialCode) {
-                    $phoneCandidates[] = $dialCode.$normalizedPhone;
-                }
-            }
-
-            $phoneCandidates = array_values(array_unique(array_filter($phoneCandidates, fn ($value) => $value !== '')));
-            $user = usersdata::whereIn('phone', $phoneCandidates)->first();
+            throw $th;
         }
-
-        if (!$user || !Hash::check($data['login_password'], $user->password)) {
-            throw ValidationException::withMessages([
-                'identifier' => 'Invalid credentials.',
-            ]);
-        }
-
-        $request->session()->put('useremail', $user->email);
-        $request->session()->regenerate();
-        $this->deferUserCityLookup($request, (int) $user->id);
-
-        return redirect('/profile');
     }
 
     function googleAuth(Request $request)
@@ -168,33 +180,43 @@ class logincontroller extends Controller
             ], 422);
         }
 
-        $user = usersdata::where('email', $email)->first();
+        try {
+            $user = usersdata::where('email', $email)->first();
 
-        if (!$user) {
-            $user = usersdata::create([
-                'fullname' => $fullName !== '' ? $fullName : 'Google User',
-                'email' => $email,
-                'phone' => $this->generatePlaceholderPhone(),
-                'location' => null,
-                'password' => Hash::make(Str::random(40)),
-                'profile_picture' => $profilePicture !== '' ? $profilePicture : null,
-            ]);
-        } else {
-            $updates = [];
-            if (!$user->profile_picture && $profilePicture !== '') {
-                $updates['profile_picture'] = $profilePicture;
+            if (!$user) {
+                $user = usersdata::create([
+                    'fullname' => $fullName !== '' ? $fullName : 'Google User',
+                    'email' => $email,
+                    'phone' => $this->generatePlaceholderPhone(),
+                    'location' => null,
+                    'password' => Hash::make(Str::random(40)),
+                    'profile_picture' => $profilePicture !== '' ? $profilePicture : null,
+                ]);
+            } else {
+                $updates = [];
+                if (!$user->profile_picture && $profilePicture !== '') {
+                    $updates['profile_picture'] = $profilePicture;
+                }
+                if ($user->fullname === '' && $fullName !== '') {
+                    $updates['fullname'] = $fullName;
+                }
+                if ($updates !== []) {
+                    $user->fill($updates)->save();
+                }
             }
-            if ($user->fullname === '' && $fullName !== '') {
-                $updates['fullname'] = $fullName;
+
+            $request->session()->put('useremail', $user->email);
+            $request->session()->regenerate();
+            $this->deferUserCityLookup($request, (int) $user->id);
+        } catch (\Throwable $th) {
+            if ($this->isDatabaseConnectionIssue($th)) {
+                return response()->json([
+                    'message' => 'Service temporarily unavailable. Please try again in a few minutes.',
+                ], 503);
             }
-            if ($updates !== []) {
-                $user->fill($updates)->save();
-            }
+
+            throw $th;
         }
-
-        $request->session()->put('useremail', $user->email);
-        $request->session()->regenerate();
-        $this->deferUserCityLookup($request, (int) $user->id);
 
         return response()->json([
             'redirect' => '/profile',
@@ -247,15 +269,16 @@ class logincontroller extends Controller
         }
 
         $ipCandidates = [];
-        if ($requestIp !== '') {
-            $ipCandidates[] = $requestIp;
-        }
 
         if ($forwardedFor !== '') {
             $firstForwardedIp = trim(explode(',', $forwardedFor)[0] ?? '');
-            if ($firstForwardedIp !== '') {
+            if ($firstForwardedIp !== '' && strcasecmp($firstForwardedIp, 'unknown') !== 0) {
                 $ipCandidates[] = $firstForwardedIp;
             }
+        }
+
+        if ($requestIp !== '') {
+            $ipCandidates[] = $requestIp;
         }
 
         $ipCandidates = array_values(array_unique(array_filter($ipCandidates, fn ($ip) => $ip !== '')));
@@ -326,5 +349,27 @@ class logincontroller extends Controller
             'AU' => '+61',
             'DE' => '+49',
         ];
+    }
+
+    private function isDatabaseConnectionIssue(\Throwable $exception): bool
+    {
+        $message = strtolower($exception->getMessage());
+        $code = (string) $exception->getCode();
+
+        $isConnectionMessage = str_contains($message, 'sqlstate[hy000] [2002]')
+            || str_contains($message, 'connection refused')
+            || str_contains($message, 'operation timed out')
+            || str_contains($message, 'no such host')
+            || str_contains($message, 'server has gone away')
+            || str_contains($message, 'could not find driver');
+
+        $isConnectionCode = in_array($code, ['2002', '2006', '1045'], true);
+
+        if ($isConnectionMessage || $isConnectionCode) {
+            return true;
+        }
+
+        $previous = $exception->getPrevious();
+        return $previous instanceof \Throwable ? $this->isDatabaseConnectionIssue($previous) : false;
     }
 }
