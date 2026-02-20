@@ -54,12 +54,13 @@ class logincontroller extends Controller
                 'fullname' => $data['fullname'],
                 'email' => $data['email'],
                 'phone' => $storedPhone,
-                'location' => $this->resolveCityFromRequest($request),
+                'location' => null,
                 'password' => Hash::make($data['signup_password']),
             ]);
 
             $request->session()->put('useremail', $user->email);
             $request->session()->regenerate();
+            $this->deferUserCityLookup($request, (int) $user->id);
 
             return redirect('/profile');
         }
@@ -111,9 +112,9 @@ class logincontroller extends Controller
             ]);
         }
 
-        $this->updateUserCityFromRequest($request, $user);
         $request->session()->put('useremail', $user->email);
         $request->session()->regenerate();
+        $this->deferUserCityLookup($request, (int) $user->id);
 
         return redirect('/profile');
     }
@@ -174,7 +175,7 @@ class logincontroller extends Controller
                 'fullname' => $fullName !== '' ? $fullName : 'Google User',
                 'email' => $email,
                 'phone' => $this->generatePlaceholderPhone(),
-                'location' => $this->resolveCityFromRequest($request),
+                'location' => null,
                 'password' => Hash::make(Str::random(40)),
                 'profile_picture' => $profilePicture !== '' ? $profilePicture : null,
             ]);
@@ -191,9 +192,9 @@ class logincontroller extends Controller
             }
         }
 
-        $this->updateUserCityFromRequest($request, $user);
         $request->session()->put('useremail', $user->email);
         $request->session()->regenerate();
+        $this->deferUserCityLookup($request, (int) $user->id);
 
         return response()->json([
             'redirect' => '/profile',
@@ -220,34 +221,36 @@ class logincontroller extends Controller
         return $dialCode.$phone;
     }
 
-    private function updateUserCityFromRequest(Request $request, usersdata $user): void
+    private function deferUserCityLookup(Request $request, int $userId): void
     {
-        if (filled($user->location)) {
+        if ($userId <= 0) {
             return;
         }
 
-        $city = $this->resolveCityFromRequest($request);
-        if ($city === null || $city === $user->location) {
-            return;
-        }
+        $requestIp = trim((string) $request->ip());
+        $forwardedFor = trim((string) $request->server('HTTP_X_FORWARDED_FOR', ''));
 
-        $user->location = $city;
-        $user->save();
+        app()->terminating(function () use ($userId, $requestIp, $forwardedFor): void {
+            $this->updateUserCityByIpCandidates($userId, $requestIp, $forwardedFor);
+        });
     }
 
-    private function resolveCityFromRequest(Request $request): ?string
+    private function updateUserCityByIpCandidates(int $userId, string $requestIp, string $forwardedFor): void
     {
         if (app()->environment('testing')) {
-            return null;
+            return;
+        }
+
+        $user = usersdata::find($userId);
+        if (!$user || filled($user->location)) {
+            return;
         }
 
         $ipCandidates = [];
-        $requestIp = trim((string) $request->ip());
         if ($requestIp !== '') {
             $ipCandidates[] = $requestIp;
         }
 
-        $forwardedFor = trim((string) $request->server('HTTP_X_FORWARDED_FOR', ''));
         if ($forwardedFor !== '') {
             $firstForwardedIp = trim(explode(',', $forwardedFor)[0] ?? '');
             if ($firstForwardedIp !== '') {
@@ -260,11 +263,17 @@ class logincontroller extends Controller
         foreach ($ipCandidates as $ip) {
             $city = $this->fetchCityByIp($ip);
             if ($city !== null) {
-                return $city;
+                $user->location = $city;
+                $user->save();
+                return;
             }
         }
 
-        return $this->fetchCityByIp(null);
+        $fallbackCity = $this->fetchCityByIp(null);
+        if ($fallbackCity !== null) {
+            $user->location = $fallbackCity;
+            $user->save();
+        }
     }
 
     private function fetchCityByIp(?string $ip): ?string
